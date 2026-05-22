@@ -101,33 +101,43 @@ function localFallbackReview(code, language) {
 }
 
 async function reviewCodeWithMIMO(code, language = 'javascript') {
-  // No key → use local heuristic so the live demo stays working
-  if (!process.env.MIMO_API_KEY) {
+  const key = (process.env.MIMO_API_KEY || '').trim();
+  const looksValid = key.length > 20 && !/your.?mimo|api.?key.?here|placeholder|xxxx/i.test(key);
+
+  // No real key → use local heuristic so the live demo stays working
+  if (!looksValid) {
     return { text: localFallbackReview(code, language), source: 'local-heuristic' };
   }
-  const response = await axios.post(
-    `${process.env.MIMO_API_URL || 'https://api.xiaomimimo.com'}/v1/chat/completions`,
-    {
-      model: 'mimo-v2.5',
-      messages: [
-        {
-          role: 'system',
-          content: `You are an expert code reviewer. Analyze ${language} code for bugs, performance, security, and best practices. Return a concise structured review with sections: Looks good, Findings (severity-tagged), and Suggested fix snippets when applicable.`
-        },
-        { role: 'user', content: `Review this ${language} code:\n\n${code}` }
-      ],
-      temperature: 0.5,
-      max_tokens: 1000
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.MIMO_API_KEY}`,
-        'Content-Type': 'application/json'
+  try {
+    const response = await axios.post(
+      `${process.env.MIMO_API_URL || 'https://api.xiaomimimo.com'}/v1/chat/completions`,
+      {
+        model: 'mimo-v2.5',
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert code reviewer. Analyze ${language} code for bugs, performance, security, and best practices. Return a concise structured review with sections: Looks good, Findings (severity-tagged), and Suggested fix snippets when applicable.`
+          },
+          { role: 'user', content: `Review this ${language} code:\n\n${code}` }
+        ],
+        temperature: 0.5,
+        max_tokens: 1000
       },
-      timeout: 25000
-    }
-  );
-  return { text: response.data.choices[0].message.content, source: 'mimo-v2.5' };
+      {
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 25000
+      }
+    );
+    return { text: response.data.choices[0].message.content, source: 'mimo-v2.5' };
+  } catch (e) {
+    // MiMo rejected → fall back so the demo never shows a raw error
+    logger.warn(`MiMo API call failed (${e.message}); using local heuristic`);
+    const fallback = localFallbackReview(code, language);
+    return { text: fallback + `\n\n_(MiMo upstream returned an error, served from local heuristic.)_`, source: 'local-heuristic-fallback' };
+  }
 }
 
 async function postReviewComment(owner, repo, prNumber, review) {
