@@ -1,0 +1,39 @@
+{
+  "name": "ai-code-reviewer",
+  "version": "1.0.0",
+  "description": "Automated code review bot using Xiaomi MiMo AI",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest",
+    "lint": "eslint src/",
+    "docker:build": "docker build -t ai-code-reviewer .",
+    "docker:run": "docker run -p 3000:3000 --env-file .env ai-code-reviewer"
+  },
+  "keywords": [
+    "code-review",
+    "ai",
+    "github",
+    "mimo",
+    "automation"
+  ],
+  "author": "Landcat",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "octokit": "^2.0.14",
+    "crypto": "^1.0.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.7.0",
+    "eslint": "^8.52.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
