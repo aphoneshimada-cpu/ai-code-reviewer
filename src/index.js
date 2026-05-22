@@ -5,203 +5,125 @@ const { Octokit } = require('octokit');
 const axios = require('axios');
 const winston = require('winston');
 
-// Logger setup
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.json(),
-  transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'logs/combined.log' })
-  ]
+  transports: [new winston.transports.Console()]
 });
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
-// Initialize GitHub client
-const octokit = new Octokit({
-  auth: process.env.GITHUB_TOKEN
-});
+const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
-// Verify GitHub webhook signature
 function verifyWebhookSignature(req) {
   const signature = req.headers['x-hub-signature-256'];
-  if (!signature) return false;
-
+  if (!signature || !process.env.GITHUB_WEBHOOK_SECRET) return false;
   const hash = crypto
     .createHmac('sha256', process.env.GITHUB_WEBHOOK_SECRET)
     .update(JSON.stringify(req.body))
     .digest('hex');
-
   return signature === `sha256=${hash}`;
 }
 
-// Call MIMO API for code review
 async function reviewCodeWithMIMO(code, language = 'javascript') {
-  try {
-    logger.info(`Reviewing ${language} code with MIMO...`);
-
-    const response = await axios.post(
-      `${process.env.MIMO_API_URL}/v1/chat/completions`,
-      {
-        model: 'mimo-v2.5',
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert code reviewer. Analyze the following ${language} code and provide:
-1. Bug detection
-2. Performance suggestions
-3. Best practices
-4. Security issues
-5. Code quality improvements
-
-Format your response as a structured review with sections.`
-          },
-          {
-            role: 'user',
-            content: `Review this ${language} code:\n\n${code}`
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 1000
+  const response = await axios.post(
+    `${process.env.MIMO_API_URL || 'https://api.xiaomimimo.com'}/v1/chat/completions`,
+    {
+      model: 'mimo-v2.5',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert code reviewer. Analyze ${language} code for bugs, performance, security, and best practices. Return a concise structured review.`
+        },
+        { role: 'user', content: `Review this ${language} code:\n\n${code}` }
+      ],
+      temperature: 0.7,
+      max_tokens: 1000
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.MIMO_API_KEY}`,
+        'Content-Type': 'application/json'
       },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.MIMO_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    return response.data.choices[0].message.content;
-  } catch (error) {
-    logger.error('MIMO API error:', error.message);
-    throw error;
-  }
+      timeout: 25000
+    }
+  );
+  return response.data.choices[0].message.content;
 }
 
-// Post review as GitHub comment
 async function postReviewComment(owner, repo, prNumber, review) {
-  try {
-    logger.info(`Posting review to ${owner}/${repo}#${prNumber}`);
-
-    const comment = `🤖 **AI Code Review by MiMo**\n\n${review}\n\n---\n⏱️ Review completed at ${new Date().toISOString()}`;
-
-    await octokit.rest.issues.createComment({
-      owner,
-      repo,
-      issue_number: prNumber,
-      body: comment
-    });
-
-    logger.info('Review comment posted successfully');
-  } catch (error) {
-    logger.error('Failed to post comment:', error.message);
-    throw error;
-  }
+  const comment = `🤖 **AI Code Review by MiMo**\n\n${review}\n\n---\n⏱️ ${new Date().toISOString()}`;
+  await octokit.rest.issues.createComment({
+    owner, repo, issue_number: prNumber, body: comment
+  });
 }
 
-// GitHub webhook handler
-app.post('/webhook/github', async (req, res) => {
-  // Verify signature
+app.post('/api/webhook', async (req, res) => {
   if (!verifyWebhookSignature(req)) {
-    logger.warn('Invalid webhook signature');
     return res.status(401).json({ error: 'Unauthorized' });
   }
-
   const event = req.headers['x-github-event'];
-  const payload = req.body;
+  if (event !== 'pull_request') return res.status(200).json({ message: 'ignored' });
 
-  logger.info(`Received GitHub event: ${event}`);
-
-  // Only handle PR events
-  if (event !== 'pull_request') {
-    return res.status(200).json({ message: 'Event ignored' });
+  const { action, pull_request, repository } = req.body;
+  if (!['opened', 'synchronize'].includes(action)) {
+    return res.status(200).json({ message: 'action ignored' });
   }
 
-  // Only review on opened or synchronize (new commits)
-  if (!['opened', 'synchronize'].includes(payload.action)) {
-    return res.status(200).json({ message: 'Action ignored' });
-  }
+  // Vercel functions have ~10s default timeout on hobby; respond fast then process async
+  res.status(202).json({ message: 'review queued' });
 
   try {
-    const { pull_request, repository } = payload;
     const owner = repository.owner.login;
     const repo = repository.name;
     const prNumber = pull_request.number;
-
-    logger.info(`Processing PR: ${owner}/${repo}#${prNumber}`);
-
-    // Get PR diff
-    const { data: prData } = await octokit.rest.pulls.get({
-      owner,
-      repo,
-      pull_number: prNumber
-    });
-
-    // Get changed files
     const { data: files } = await octokit.rest.pulls.listFiles({
-      owner,
-      repo,
-      pull_number: prNumber
+      owner, repo, pull_number: prNumber
     });
-
-    // Review each changed file
-    let allReviews = [];
-    for (const file of files.slice(0, 5)) { // Limit to first 5 files
-      if (file.patch && file.patch.length < 5000) { // Limit patch size
+    const reviews = [];
+    for (const file of files.slice(0, 3)) {
+      if (file.patch && file.patch.length < 4000) {
         try {
-          const review = await reviewCodeWithMIMO(file.patch, file.filename.split('.').pop());
-          allReviews.push(`**File: ${file.filename}**\n${review}`);
-        } catch (error) {
-          logger.error(`Failed to review ${file.filename}:`, error.message);
+          const r = await reviewCodeWithMIMO(file.patch, file.filename.split('.').pop());
+          reviews.push(`**${file.filename}**\n${r}`);
+        } catch (e) {
+          logger.error(`review failed for ${file.filename}: ${e.message}`);
         }
       }
     }
-
-    // Post combined review
-    if (allReviews.length > 0) {
-      const combinedReview = allReviews.join('\n\n---\n\n');
-      await postReviewComment(owner, repo, prNumber, combinedReview);
+    if (reviews.length) {
+      await postReviewComment(owner, repo, prNumber, reviews.join('\n\n---\n\n'));
     }
-
-    res.status(200).json({ success: true, reviewed_files: allReviews.length });
-  } catch (error) {
-    logger.error('Webhook processing error:', error.message);
-    res.status(500).json({ error: error.message });
+  } catch (e) {
+    logger.error(`webhook processing: ${e.message}`);
   }
 });
 
-// Manual review endpoint
-app.post('/review', async (req, res) => {
+app.post('/api/review', async (req, res) => {
   try {
     const { code, language = 'javascript' } = req.body;
-
-    if (!code) {
-      return res.status(400).json({ error: 'Code is required' });
-    }
-
+    if (!code) return res.status(400).json({ error: 'code required' });
     const review = await reviewCodeWithMIMO(code, language);
     res.json({ review, tokens_used: Math.floor(code.length / 4) });
-  } catch (error) {
-    logger.error('Review error:', error.message);
-    res.status(500).json({ error: error.message });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// Health check
-app.get('/health', (req, res) => {
+app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     service: 'ai-code-reviewer',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    runtime: 'vercel-serverless'
   });
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  logger.info(`🚀 AI Code Reviewer running on port ${PORT}`);
-  logger.info(`📡 Webhook URL: http://localhost:${PORT}/webhook/github`);
-});
+// Local dev fallback
+if (process.env.NODE_ENV !== 'production' && require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => logger.info(`🚀 local dev on :${PORT}`));
+}
+
+module.exports = app;
