@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Code Reviewer · powered by Xiaomi MiMo</title>
+<meta name="description" content="Automated GitHub PR review using Xiaomi MiMo. Real-time, multi-language, security-aware." />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0b0d10;
+    --bg2: #11141a;
+    --line: #1f2530;
+    --text: #e8ecf1;
+    --muted: #8b95a5;
+    --accent: #ff6a3d;
+    --accent2: #ffb37c;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+  }
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { color: var(--accent); }
+  .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* nav */
+  nav {
+    border-bottom: 1px solid var(--line);
+    padding: 16px 0;
+    position: sticky; top: 0;
+    background: rgba(11,13,16,0.85);
+    backdrop-filter: blur(8px);
+    z-index: 10;
+  }
+  nav .container { display: flex; align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .brand-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 0 12px var(--accent);
+  }
+  nav .links { display: flex; gap: 22px; font-size: 14px; color: var(--muted); }
+  nav .links a { color: var(--muted); }
+  nav .links a:hover { color: var(--text); }
+
+  /* hero */
+  .hero { padding: 80px 0 60px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(255,106,61,0.1);
+    color: var(--accent2);
+    border: 1px solid rgba(255,106,61,0.25);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+  .badge .live-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ok);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--ok); }
+    50% { opacity: 0.6; }
+  }
+  h1 {
+    font-size: 56px;
+    line-height: 1.1;
+    font-weight: 700;
+    letter-spacing: -1.5px;
+    margin-bottom: 20px;
+  }
+  h1 .grad {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .lede {
+    font-size: 18px;
+    color: var(--muted);
+    max-width: 640px;
+    margin-bottom: 32px;
+  }
+  .cta {
+    display: flex; gap: 12px; flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 22px;
+    border-radius: 8px;
+    font-weight: 500;
+    font-size: 15px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .btn-primary:hover { background: var(--accent2); border-color: var(--accent2); color: #1a0e07; }
+  .btn-ghost {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--line);
+  }
+  .btn-ghost:hover { border-color: var(--muted); }
+
+  /* features */
+  .features {
+    padding: 60px 0;
+    border-top: 1px solid var(--line);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .card h3 { font-size: 16px; margin-bottom: 8px; }
+  .card p { color: var(--muted); font-size: 14px; }
+  .card .ic {
+    width: 36px; height: 36px;
+    background: rgba(255,106,61,0.12);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 14px;
+    color: var(--accent2);
+    font-size: 18px;
+  }
+
+  /* demo */
+  .demo { padding: 60px 0; border-top: 1px solid var(--line); }
+  .demo h2 {
+    font-size: 32px;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+  }
+  .demo .sub { color: var(--muted); margin-bottom: 28px; font-size: 15px; }
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .panel {
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .panel-head {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--muted);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-head .lang {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+  textarea {
+    width: 100%;
+    background: transparent;
+    border: 0;
+    color: var(--text);
+    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 13px;
+    padding: 16px;
+    resize: vertical;
+    min-height: 280px;
+    line-height: 1.55;
+    outline: none;
+  }
+  .review-out {
+    padding: 16px;
+    min-height: 280px;
+    font-size: 13.5px;
+    color: var(--text);
+    white-space: pre-wrap;
+    line-height: 1.6;
+  }
+  .review-out.empty { color: var(--muted); font-style: italic; }
+  .review-meta {
+    border-top: 1px solid var(--line);
+    padding: 10px 16px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex; gap: 16px;
+  }
+  .controls {
+    display: flex; align-items: center; gap: 12px;
+    margin-top: 16px;
+  }
+  .status-line { color: var(--muted); font-size: 13px; }
+  .status-line.ok { color: var(--ok); }
+  .status-line.err { color: var(--err); }
+
+  /* footer */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 32px 0;
+    margin-top: 60px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  footer .container { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+
+  @media (max-width: 760px) {
+    h1 { font-size: 38px; }
+    .grid { grid-template-columns: 1fr; }
+    .demo-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>AI Code Reviewer</span>
+    </div>
+    <div class="links">
+      <a href="#demo">Demo</a>
+      <a href="#features">Features</a>
+      <a href="/api/health" target="_blank">Status</a>
+      <a href="https://github.com/aphoneshimada-cpu/ai-code-reviewer" target="_blank">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="container">
+    <div class="badge"><span class="live-dot"></span> Live · powered by Xiaomi MiMo V2.5</div>
+    <h1>Automated PR review,<br/><span class="grad">in seconds.</span></h1>
+    <p class="lede">A lightweight GitHub bot that reviews every pull request with Xiaomi MiMo. Catches bugs, perf issues, security smells, and posts the review back as a comment — automatically.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#demo">Try the live demo →</a>
+      <a class="btn btn-ghost" href="https://github.com/aphoneshimada-cpu/ai-code-reviewer" target="_blank">View source</a>
+    </div>
+  </div>
+</section>
+
+<section class="features" id="features">
+  <div class="container">
+    <div class="grid">
+      <div class="card">
+        <div class="ic">⚡</div>
+        <h3>2–5s per file</h3>
+        <p>Webhook reply in 202, MiMo runs review async, comment lands on the PR before the dev finishes their next sip.</p>
+      </div>
+      <div class="card">
+        <div class="ic">🔐</div>
+        <h3>Security-aware</h3>
+        <p>Detects SQL injection, XSS, hardcoded secrets, and unsafe input handling. HMAC-verified webhooks.</p>
+      </div>
+      <div class="card">
+        <div class="ic">🌐</div>
+        <h3>Multi-language</h3>
+        <p>JavaScript, Python, Go, Rust, Java, TypeScript. Language is auto-detected from the file extension.</p>
+      </div>
+      <div class="card">
+        <div class="ic">🤖</div>
+        <h3>MiMo V2.5</h3>
+        <p>Long-chain reasoning per file, then aggregated summary. Tuned prompt for actionable, line-anchored feedback.</p>
+      </div>
+      <div class="card">
+        <div class="ic">📦</div>
+        <h3>Serverless</h3>
+        <p>Deployed on Vercel. Cold start under 800ms, scales to thousands of PRs/day on the free tier.</p>
+      </div>
+      <div class="card">
+        <div class="ic">🔁</div>
+        <h3>Re-review on push</h3>
+        <p>Every new commit triggers a fresh review on just the changed lines. Stay in the loop without spam.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="demo" id="demo">
+  <div class="container">
+    <h2>Live demo</h2>
+    <p class="sub">Paste any code on the left, hit <b>Review</b>, MiMo replies on the right.</p>
+    <div class="demo-grid">
+      <div class="panel">
+        <div class="panel-head">
+          <span>Your code</span>
+          <select class="lang" id="lang">
+            <option value="javascript">JavaScript</option>
+            <option value="typescript">TypeScript</option>
+            <option value="python">Python</option>
+            <option value="go">Go</option>
+            <option value="rust">Rust</option>
+            <option value="java">Java</option>
+          </select>
+        </div>
+        <textarea id="code" spellcheck="false">function getUser(id) {
+  const sql = "SELECT * FROM users WHERE id = " + id;
+  db.query(sql, (err, rows) => {
+    if (err) console.log(err);
+    return rows[0];
+  });
+}</textarea>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span>MiMo review</span><span id="status-pill"></span></div>
+        <div class="review-out empty" id="review">Click Review to see MiMo's analysis…</div>
+        <div class="review-meta" id="meta" style="display:none;">
+          <span>⏱ <span id="m-time">–</span></span>
+          <span>🪙 <span id="m-tokens">–</span> tokens</span>
+        </div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="btn btn-primary" id="run">Review code</button>
+      <span class="status-line" id="status">Ready.</span>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div>© 2026 AI Code Reviewer · Built with Hermes Agent + Xiaomi MiMo</div>
+    <div>
+      <a href="https://github.com/aphoneshimada-cpu/ai-code-reviewer" target="_blank">GitHub</a> ·
+      <a href="/api/health" target="_blank">Health</a> ·
+      <a href="https://platform.xiaomimimo.com" target="_blank">MiMo Platform</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const codeEl = $('code'), langEl = $('lang'), runBtn = $('run');
+  const reviewEl = $('review'), statusEl = $('status'), metaEl = $('meta');
+  const mTime = $('m-time'), mTokens = $('m-tokens');
+
+  async function runReview() {
+    const code = codeEl.value.trim();
+    if (!code) { statusEl.textContent = 'Paste some code first.'; return; }
+    runBtn.disabled = true;
+    statusEl.className = 'status-line';
+    statusEl.textContent = 'Sending to MiMo…';
+    reviewEl.classList.add('empty');
+    reviewEl.textContent = 'MiMo is thinking…';
+    metaEl.style.display = 'none';
+    const t0 = performance.now();
+    try {
+      const res = await fetch('/api/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, language: langEl.value })
+      });
+      const data = await res.json();
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+      if (!res.ok) {
+        reviewEl.classList.remove('empty');
+        reviewEl.textContent = '⚠️ ' + (data.error || 'Review failed') +
+          '\n\nTip: this happens when MIMO_API_KEY is not configured yet. ' +
+          'Once your token plan is approved, set the key in Vercel and redeploy.';
+        statusEl.className = 'status-line err';
+        statusEl.textContent = 'Error: ' + (data.error || res.statusText);
+        return;
+      }
+      reviewEl.classList.remove('empty');
+      reviewEl.textContent = data.review;
+      mTime.textContent = elapsed + 's';
+      mTokens.textContent = data.tokens_used || '–';
+      metaEl.style.display = 'flex';
+      statusEl.className = 'status-line ok';
+      statusEl.textContent = '✓ Reviewed in ' + elapsed + 's';
+    } catch (e) {
+      reviewEl.classList.remove('empty');
+      reviewEl.textContent = '⚠️ Network error: ' + e.message;
+      statusEl.className = 'status-line err';
+      statusEl.textContent = 'Network error';
+    } finally {
+      runBtn.disabled = false;
+    }
+  }
+
+  runBtn.addEventListener('click', runReview);
+
+  // health pill
+  fetch('/api/health').then(r => r.json()).then(d => {
+    const pill = $('status-pill');
+    pill.innerHTML = '<span style="color:var(--ok);font-size:12px">● online</span>';
+  }).catch(() => {
+    const pill = $('status-pill');
+    pill.innerHTML = '<span style="color:var(--err);font-size:12px">● offline</span>';
+  });
+</script>
+
+</body>
+</html>
